@@ -1,0 +1,82 @@
+FROM ubuntu:20.04
+
+
+RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    apt-get update && \
+    apt-get install -y mysql-server mysql-client
+ # 新增一个数据库访问用户
+ RUN service mysql start && \
+     mysql -e "CREATE USER 'write'@'localhost' IDENTIFIED BY '123456';" && \
+     mysql -e "GRANT ALL PRIVILEGES ON *.* TO 'write'@'localhost' WITH GRANT OPTION;" && \
+     mysql -e "UPDATE mysql.user SET host = '%' WHERE user = 'write';" && \
+     mysql -e "FLUSH PRIVILEGES;"
+ # 创建3个数据库
+ RUN service mysql start && \
+     mysql -e "CREATE DATABASE payment_gateway;" && \
+     mysql -e "CREATE DATABASE gateway;" && \
+     mysql -e "CREATE DATABASE bindo;"
+# COPY ./payment_gateway.sql .
+# 执行payment_gateway.sql文件
+
+#  允许外部连接
+RUN echo "bind-address = 0.0.0.0" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+
+RUN apt-get update && \
+    apt-get install -y wget && \
+    apt-get install -y build-essential
+# 安装Golang和相关依赖
+ RUN wget https://golang.google.cn/dl/go1.17.10.linux-amd64.tar.gz \
+     && tar -C /usr/local -xzf go1.17.10.linux-amd64.tar.gz \
+     && rm go1.17.10.linux-amd64.tar.gz
+
+ ENV PATH="/usr/local/go/bin:${PATH}"
+# 复制应用程序代码到容器中
+# 安装redis
+ RUN wget -O redis.tar.gz https://mirrors.huaweicloud.com/redis/redis-6.2.3.tar.gz && \
+     tar xvzf redis.tar.gz && \
+     mv redis-6.2.3 /etc/redis && \
+     cd /etc/redis && \
+     make && \
+     make install
+RUN sed -i 's/bind 127.0.0.1/bind 0.0.0.0/' /etc/redis/redis.conf
+# RUN sed -i 's/daemonize no/daemonize yes/' /etc/redis/redis.conf
+
+
+
+COPY . docker_test
+WORKDIR docker_test
+
+# RUN  echo `cat ./sql/payment_gateway_insert.sql` & sleep 10
+RUN service mysql start && \
+    mysql -u write -p123456 payment_gateway < ./sql/payment_gateway.sql && \
+    mysql -u write -p123456 bindo < ./sql/bindo.sql
+#    mysql -u write -p123456 gateway < ./sql/gateway.sql  && \
+# RUN service mysql start && \
+#     mysql -u write -p123456 payment_gateway < ./sql/payment_gateway_insert.sql
+#
+# RUN service mysql start && \
+#     mysql -u write -p123456 bindo < ./sql/bindo_insert.sql
+# 构建应用程序
+# RUN go mod download
+# WORKDIR docker_test
+# RUN go build -o main_bin ./cmd/api
+# RUN chmod +x main_bin
+
+
+WORKDIR /
+
+# RUN echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
+# RUN bash -c "$(curl -ksSL https://httprunner.com/script/install.sh)"
+RUN mv ./docker_test/hrp /usr/local/bin/hrp
+# EXPOSE 80
+EXPOSE 3306
+EXPOSE 6379
+
+# RUN redis-server /etc/redis/redis.conf
+# 启动应用程序
+# CMD ["/main_bin","mysqld"]
+# CMD ["mysqld"]
+# CMD ["redis-server","/etc/redis/redis.conf","mysqld"]
+# CMD ["sh", "-c", "service mysql start && "]
+# 本地调试才是
+ENTRYPOINT ["/bin/bash", "/docker_test/entrypoint.sh"]
